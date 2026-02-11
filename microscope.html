@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Microscope Histogram Equalizer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111;
+      --panel: #1b1b1b;
+      --line: #333;
+      --text: #efefef;
+      --muted: #a8a8a8;
+      --accent: #4da3ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: 100vh;
+    }
+    .sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    h1 {
+      font-size: 1.1rem;
+      margin: 0 0 8px;
+    }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    .control {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    label { font-size: 0.9rem; }
+    input[type="range"], input[type="file"], select, button {
+      width: 100%;
+    }
+    button {
+      border: 1px solid #4b4b4b;
+      background: #2a2a2a;
+      color: white;
+      padding: 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    .main {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 420px;
+      gap: 16px;
+      align-items: start;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #181818;
+      padding: 10px;
+    }
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    canvas {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      border: 1px solid #3a3a3a;
+      background: #0d0d0d;
+      display: block;
+      image-rendering: auto;
+    }
+    .stats {
+      font-size: 0.88rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 1fr; }
+      .main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h1>🔬 Microscope Histogram Equalizer</h1>
+      <div class="muted">Pure HTML Canvas version (no UI framework).</div>
+
+      <div class="control">
+        <label for="upload">Upload image</label>
+        <input id="upload" type="file" accept="image/*" />
+      </div>
+
+      <div class="control">
+        <label for="lensSize">Lens size: <span id="lensSizeValue">220</span> px</label>
+        <input id="lensSize" type="range" min="64" max="700" step="2" value="220" />
+      </div>
+
+      <div class="control">
+        <label for="zoom">Zoom: <span id="zoomValue">4.0</span>x</label>
+        <input id="zoom" type="range" min="1" max="12" step="0.1" value="4" />
+      </div>
+
+      <div class="control">
+        <label><input id="histToggle" type="checkbox" checked /> Histogram equalization (ON/OFF)</label>
+        <label for="intensity">Intensity blend: <span id="intensityValue">100</span>%</label>
+        <input id="intensity" type="range" min="0" max="100" step="1" value="100" />
+      </div>
+
+      <div class="control">
+        <label for="snapshotSize">Snapshot size</label>
+        <select id="snapshotSize">
+          <option value="1024">1024 px (high)</option>
+          <option value="1536" selected>1536 px (very high)</option>
+          <option value="2048">2048 px (ultra)</option>
+        </select>
+        <button id="snapshotBtn">📸 Snapshot magnifier</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="panel">
+        <h2>Canvas (click to place microscope)</h2>
+        <canvas id="sourceCanvas"></canvas>
+        <div class="stats" id="sourceStats">Upload an image to begin.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Microscope view</h2>
+        <canvas id="lensCanvas" width="900" height="900"></canvas>
+        <div class="stats" id="lensStats">Magnifier is always active after click.</div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const upload = document.getElementById('upload');
+    const sourceCanvas = document.getElementById('sourceCanvas');
+    const lensCanvas = document.getElementById('lensCanvas');
+    const sourceCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+    const lensCtx = lensCanvas.getContext('2d', { willReadFrequently: true });
+
+    const lensSize = document.getElementById('lensSize');
+    const lensSizeValue = document.getElementById('lensSizeValue');
+    const zoom = document.getElementById('zoom');
+    const zoomValue = document.getElementById('zoomValue');
+    const histToggle = document.getElementById('histToggle');
+    const intensity = document.getElementById('intensity');
+    const intensityValue = document.getElementById('intensityValue');
+    const snapshotBtn = document.getElementById('snapshotBtn');
+    const snapshotSize = document.getElementById('snapshotSize');
+    const sourceStats = document.getElementById('sourceStats');
+    const lensStats = document.getElementById('lensStats');
+
+    let imageBitmap = null;
+    let imageDataCache = null;
+    let lensCenter = null;
+
+    function updateLabels() {
+      lensSizeValue.textContent = lensSize.value;
+      zoomValue.textContent = Number(zoom.value).toFixed(1);
+      intensityValue.textContent = intensity.value;
+      intensity.disabled = !histToggle.checked;
+    }
+
+    function fitCanvasToImage(bitmap) {
+      const maxWidth = Math.max(420, window.innerWidth - 520);
+      const scale = Math.min(1, maxWidth / bitmap.width);
+      sourceCanvas.width = Math.round(bitmap.width * scale);
+      sourceCanvas.height = Math.round(bitmap.height * scale);
+      sourceCtx.drawImage(bitmap, 0, 0, sourceCanvas.width, sourceCanvas.height);
+      imageDataCache = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+      sourceStats.textContent = `Image: ${bitmap.width}x${bitmap.height} | Display: ${sourceCanvas.width}x${sourceCanvas.height}`;
+    }
+
+    function drawLensMarker() {
+      if (!lensCenter) return;
+      sourceCtx.putImageData(imageDataCache, 0, 0);
+      sourceCtx.save();
+      sourceCtx.strokeStyle = '#4da3ff';
+      sourceCtx.lineWidth = 2;
+      const r = Number(lensSize.value) / 2;
+      sourceCtx.beginPath();
+      sourceCtx.arc(lensCenter.x, lensCenter.y, r, 0, Math.PI * 2);
+      sourceCtx.stroke();
+      sourceCtx.restore();
+    }
+
+    function histogramEqualizeRGBA(rgba, blendPercent) {
+      const blend = Math.max(0, Math.min(1, blendPercent / 100));
+      if (blend === 0) return rgba;
+
+      const hist = new Uint32Array(256);
+      const yVals = new Uint8Array(rgba.length / 4);
+
+      for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
+        const y = Math.round(0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2]);
+        yVals[p] = y;
+        hist[y]++;
+      }
+
+      const cdf = new Uint32Array(256);
+      cdf[0] = hist[0];
+      for (let i = 1; i < 256; i++) cdf[i] = cdf[i - 1] + hist[i];
+
+      let cdfMin = 0;
+      for (let i = 0; i < 256; i++) {
+        if (cdf[i] !== 0) { cdfMin = cdf[i]; break; }
+      }
+      const total = yVals.length;
+      const denom = Math.max(1, total - cdfMin);
+
+      const lut = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) {
+        lut[i] = Math.max(0, Math.min(255, Math.round(((cdf[i] - cdfMin) / denom) * 255)));
+      }
+
+      const out = new Uint8ClampedArray(rgba);
+      for (let i = 0, p = 0; i < out.length; i += 4, p++) {
+        const oldY = yVals[p];
+        const newY = lut[oldY];
+        const gain = oldY === 0 ? 0 : newY / oldY;
+
+        const eqR = Math.max(0, Math.min(255, Math.round(out[i] * gain)));
+        const eqG = Math.max(0, Math.min(255, Math.round(out[i + 1] * gain)));
+        const eqB = Math.max(0, Math.min(255, Math.round(out[i + 2] * gain)));
+
+        out[i] = Math.round(out[i] * (1 - blend) + eqR * blend);
+        out[i + 1] = Math.round(out[i + 1] * (1 - blend) + eqG * blend);
+        out[i + 2] = Math.round(out[i + 2] * (1 - blend) + eqB * blend);
+      }
+
+      return out;
+    }
+
+    function renderLens() {
+      if (!imageDataCache || !lensCenter) {
+        lensCtx.clearRect(0, 0, lensCanvas.width, lensCanvas.height);
+        return;
+      }
+
+      drawLensMarker();
+
+      const r = Math.round(Number(lensSize.value) / 2);
+      const x = Math.round(lensCenter.x);
+      const y = Math.round(lensCenter.y);
+
+      const x1 = Math.max(0, x - r);
+      const y1 = Math.max(0, y - r);
+      const x2 = Math.min(sourceCanvas.width, x + r);
+      const y2 = Math.min(sourceCanvas.height, y + r);
+
+      const cropW = Math.max(1, x2 - x1);
+      const cropH = Math.max(1, y2 - y1);
+
+      const crop = sourceCtx.getImageData(x1, y1, cropW, cropH);
+      if (histToggle.checked) {
+        crop.data.set(histogramEqualizeRGBA(crop.data, Number(intensity.value)));
+      }
+
+      const tmpCanvas = document.createElement('canvas');
+      tmpCanvas.width = cropW;
+      tmpCanvas.height = cropH;
+      const tmpCtx = tmpCanvas.getContext('2d');
+      tmpCtx.putImageData(crop, 0, 0);
+
+      const z = Number(zoom.value);
+      const outW = Math.max(1, Math.round(cropW * z));
+      const outH = Math.max(1, Math.round(cropH * z));
+
+      lensCanvas.width = outW;
+      lensCanvas.height = outH;
+      lensCtx.imageSmoothingEnabled = true;
+      lensCtx.imageSmoothingQuality = 'high';
+      lensCtx.drawImage(tmpCanvas, 0, 0, outW, outH);
+
+      lensStats.textContent = `Center: (${x}, ${y}) | Crop: ${cropW}x${cropH} | Zoom: ${z.toFixed(1)}x | HE: ${histToggle.checked ? 'ON' : 'OFF'}`;
+    }
+
+    upload.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const bmp = await createImageBitmap(file);
+      imageBitmap = bmp;
+      fitCanvasToImage(bmp);
+      lensCenter = { x: Math.floor(sourceCanvas.width / 2), y: Math.floor(sourceCanvas.height / 2) };
+      renderLens();
+    });
+
+    sourceCanvas.addEventListener('click', (e) => {
+      if (!imageBitmap) return;
+      const rect = sourceCanvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (sourceCanvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (sourceCanvas.height / rect.height);
+      lensCenter = { x, y };
+      renderLens();
+    });
+
+    [lensSize, zoom, histToggle, intensity].forEach((el) => {
+      el.addEventListener('input', () => {
+        updateLabels();
+        renderLens();
+      });
+    });
+
+    snapshotBtn.addEventListener('click', () => {
+      if (!lensCanvas.width || !lensCanvas.height) return;
+
+      const target = Number(snapshotSize.value);
+      const scale = target / Math.max(lensCanvas.width, lensCanvas.height);
+      const w = Math.max(1, Math.round(lensCanvas.width * scale));
+      const h = Math.max(1, Math.round(lensCanvas.height * scale));
+
+      const highCanvas = document.createElement('canvas');
+      highCanvas.width = w;
+      highCanvas.height = h;
+      const hCtx = highCanvas.getContext('2d');
+      hCtx.imageSmoothingEnabled = true;
+      hCtx.imageSmoothingQuality = 'high';
+      hCtx.drawImage(lensCanvas, 0, 0, w, h);
+
+      highCanvas.toBlob((blob) => {
+        if (!blob) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `microscope_snapshot_${w}x${h}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      }, 'image/png');
+    });
+
+    window.addEventListener('resize', () => {
+      if (!imageBitmap) return;
+      fitCanvasToImage(imageBitmap);
+      if (!lensCenter) {
+        lensCenter = { x: Math.floor(sourceCanvas.width / 2), y: Math.floor(sourceCanvas.height / 2) };
+      }
+      renderLens();
+    });
+
+    updateLabels();
+  </script>
+</body>
+</html>
