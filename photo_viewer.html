@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photo Clarity Viewer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#111827;color:#e2e8f0;font-family:'Consolas','Courier New',monospace}
+body{display:flex;flex-direction:column}
+#topbar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#0f172a;border-bottom:1px solid #1e3a5f;flex-shrink:0}
+#topbar h1{font-size:13px;color:#38bdf8;white-space:nowrap}
+#topbar .sep{width:1px;height:18px;background:#1e3a5f}
+#main{display:flex;flex:1;overflow:hidden}
+#panel{width:270px;min-width:270px;background:#0f172a;border-right:1px solid #1e3a5f;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+#viewer{flex:1;position:relative;overflow:hidden;cursor:crosshair;background:#000}
+canvas{position:absolute;top:0;left:0;display:block}
+#lensCanvas{pointer-events:none}
+.drop-zone{border:2px dashed #1e3a5f;border-radius:6px;padding:14px 6px;text-align:center;cursor:pointer;font-size:11px;color:#64748b;transition:border-color .15s}
+.drop-zone:hover,.drop-zone.over{border-color:#38bdf8;color:#38bdf8}
+#fileInput{display:none}
+.sec{font-size:10px;color:#0f172a;background:#38bdf8;padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.8px;margin-top:2px}
+.row{display:flex;align-items:center;gap:4px;font-size:11px}
+.lbl{flex:1;color:#94a3b8;font-size:10px;white-space:nowrap}
+.val{min-width:52px;text-align:center;background:#1e293b;border:1px solid #1e3a5f;padding:2px 4px;border-radius:3px;font-size:11px;color:#38bdf8}
+.val.wide{min-width:90px}
+.btn{background:#1e3a5f;border:1px solid #2d4f7c;color:#e2e8f0;padding:3px 7px;border-radius:3px;cursor:pointer;font-size:11px;transition:background .1s;white-space:nowrap}
+.btn:hover{background:#2d4f7c}
+.btn:active{background:#e94560}
+.btn.on{background:#e94560;border-color:#e94560}
+.sm{padding:2px 7px;min-width:22px;font-size:13px;font-weight:bold}
+.wide-btn{width:100%;padding:5px;font-size:11px}
+.info{font-size:10px;color:#475569;text-align:center;padding:1px 0}
+.help{font-size:10px;color:#334155;line-height:1.6;padding:4px 2px}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1>📷 Photo Clarity Viewer</h1>
+  <div class="sep"></div>
+  <span id="imgInfo" style="font-size:10px;color:#475569">No image</span>
+  <div class="sep"></div>
+  <span id="posInfo" style="font-size:10px;color:#334155"></span>
+</div>
+
+<div id="main">
+<div id="panel">
+
+  <!-- FILE LOAD -->
+  <div class="drop-zone" id="dropZone">
+    <div>📂 Drop image here or click</div>
+    <div style="margin-top:4px;font-size:10px;color:#334155">JPG · PNG · WebP · BMP · TIFF</div>
+    <input id="fileInput" type="file" accept="image/*">
+  </div>
+
+  <!-- MAGNIFIER -->
+  <div class="sec">🔍 Magnifier</div>
+  <div class="row">
+    <span class="lbl">Lens Size</span>
+    <button class="btn sm" onclick="adj('lensSize',-20)">▼</button>
+    <span class="val" id="v-lensSize">200 px</span>
+    <button class="btn sm" onclick="adj('lensSize',20)">▲</button>
+  </div>
+  <div class="row">
+    <span class="lbl">Lens Zoom</span>
+    <button class="btn sm" onclick="adj('lensMag',-0.5)">▼</button>
+    <span class="val" id="v-lensMag">3.0×</span>
+    <button class="btn sm" onclick="adj('lensMag',0.5)">▲</button>
+  </div>
+  <button id="lockBtn" class="btn wide-btn" onclick="toggleLock()">🔓 Lock Lens  [L]</button>
+
+  <!-- VIEW -->
+  <div class="sec">🖼 View</div>
+  <div class="row">
+    <span class="lbl">Zoom</span>
+    <button class="btn sm" onclick="adjZoom(-0.2)">▼</button>
+    <span class="val" id="v-zoom">100%</span>
+    <button class="btn sm" onclick="adjZoom(0.2)">▲</button>
+  </div>
+  <div class="row" style="gap:4px">
+    <button class="btn" style="flex:1" onclick="fitView()">Fit [F]</button>
+    <button class="btn" style="flex:1" onclick="view1to1()">1:1 [1]</button>
+  </div>
+
+  <!-- CLAHE -->
+  <div class="sec">⚗ CLAHE</div>
+  <div class="row">
+    <span class="lbl">Preset</span>
+    <button class="btn sm" onclick="adjPreset(-1)">▼</button>
+    <span class="val wide" id="v-preset">Off</span>
+    <button class="btn sm" onclick="adjPreset(1)">▲</button>
+  </div>
+  <div class="row">
+    <span class="lbl">Clip Limit</span>
+    <button class="btn sm" onclick="adj('claheClip',-0.5)">▼</button>
+    <span class="val" id="v-claheClip">3.0</span>
+    <button class="btn sm" onclick="adj('claheClip',0.5)">▲</button>
+  </div>
+  <div class="row">
+    <span class="lbl">Tile Grid</span>
+    <button class="btn sm" onclick="adj('claheGrid',-1)">▼</button>
+    <span class="val" id="v-claheGrid">8</span>
+    <button class="btn sm" onclick="adj('claheGrid',1)">▲</button>
+  </div>
+
+  <!-- LEVELS -->
+  <div class="sec">🎚 Levels</div>
+  <div class="row">
+    <span class="lbl">Black Pt</span>
+    <button class="btn sm" onclick="adj('blackPt',-5)">▼</button>
+    <span class="val" id="v-blackPt">0</span>
+    <button class="btn sm" onclick="adj('blackPt',5)">▲</button>
+  </div>
+  <div class="row">
+    <span class="lbl">Mid Pt</span>
+    <button class="btn sm" onclick="adj('midPt',-5)">▼</button>
+    <span class="val" id="v-midPt">128</span>
+    <button class="btn sm" onclick="adj('midPt',5)">▲</button>
+  </div>
+  <div class="row">
+    <span class="lbl">White Pt</span>
+    <button class="btn sm" onclick="adj('whitePt',-5)">▼</button>
+    <span class="val" id="v-whitePt">255</span>
+    <button class="btn sm" onclick="adj('whitePt',5)">▲</button>
+  </div>
+  <button class="btn wide-btn" onclick="resetLevels()">↺ Reset Levels</button>
+
+  <!-- DENOISE -->
+  <div class="sec">🌿 Denoise</div>
+  <div class="row">
+    <span class="lbl">Strength (0–10)</span>
+    <button class="btn sm" onclick="adj('denoise',-1)">▼</button>
+    <span class="val" id="v-denoise">0</span>
+    <button class="btn sm" onclick="adj('denoise',1)">▲</button>
+  </div>
+
+  <!-- PCA -->
+  <div class="sec">📊 PCA Channels</div>
+  <div class="row">
+    <span class="lbl">Component</span>
+    <button class="btn sm" onclick="adjPca(-1)">▼</button>
+    <span class="val wide" id="v-pca">Off</span>
+    <button class="btn sm" onclick="adjPca(1)">▲</button>
+  </div>
+  <div class="info" id="pcaInfo"></div>
+
+  <!-- HELP -->
+  <div class="sec" style="margin-top:4px">ℹ Help</div>
+  <div class="help">
+    <b>Mouse:</b> hover → lens follows<br>
+    <b>Scroll wheel:</b> zoom in/out<br>
+    <b>Alt+drag / right-drag:</b> pan<br>
+    <b>Lens locked:</b> left-drag to pan<br>
+    <b>L</b> lock · <b>F</b> fit · <b>1</b> 1:1 · <b>+/−</b> zoom
+  </div>
+
+</div><!-- /panel -->
+
+<div id="viewer">
+  <canvas id="mainCanvas"></canvas>
+  <canvas id="lensCanvas"></canvas>
+</div>
+</div><!-- /main -->
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────
+const S = {
+  // Image
+  orig: null,           // Uint8ClampedArray (RGBA)
+  iw: 0, ih: 0,
+  processed: null,      // Uint8ClampedArray after pipeline
+  pcaCache: null,       // [pc1, pc2, pc3] Uint8ClampedArray arrays
+
+  // View
+  zoom: 1, panX: 0, panY: 0,
+
+  // Lens
+  lensSize: 200, lensMag: 3.0,
+  lensLocked: false, lockX: 0, lockY: 0,
+  curX: 0, curY: 0, showLens: false,
+
+  // CLAHE
+  presetIdx: 0,
+  claheClip: 3.0, claheGrid: 8,
+
+  // Levels
+  blackPt: 0, midPt: 128, whitePt: 255,
+
+  // Denoise
+  denoise: 0,
+
+  // PCA
+  pcaIdx: 0,   // 0=off, 1=PC1, 2=PC2, 3=PC3
+
+  // Control
+  dirty: false,
+
+  // Pan interaction
+  panning: false,
+  panSX: 0, panSY: 0, panOX: 0, panOY: 0,
+};
+
+const PRESETS = [
+  { name: 'Off',         clip: 0,    grid: 8  },
+  { name: 'Subtle',      clip: 1.5,  grid: 8  },
+  { name: 'Medium',      clip: 3.0,  grid: 8  },
+  { name: 'Strong',      clip: 6.0,  grid: 8  },
+  { name: 'Very Strong', clip: 10.0, grid: 8  },
+  { name: 'Fine Detail', clip: 3.0,  grid: 16 },
+  { name: 'Wide Tile',   clip: 4.0,  grid: 4  },
+];
+
+const PCA_NAMES = ['Off', 'PC 1', 'PC 2', 'PC 3'];
+
+const BOUNDS = {
+  lensSize:  [40,  600, 20 ],
+  lensMag:   [1,   12,  0.5],
+  claheClip: [0.5, 40,  0.5],
+  claheGrid: [2,   32,  1  ],
+  blackPt:   [0,   250, 5  ],
+  midPt:     [2,   253, 5  ],
+  whitePt:   [5,   255, 5  ],
+  denoise:   [0,   10,  1  ],
+};
+
+// ─────────────────────────────────────────────────────────────
+// DOM
+// ─────────────────────────────────────────────────────────────
+const viewer    = document.getElementById('viewer');
+const mainCvs   = document.getElementById('mainCanvas');
+const lensCvs   = document.getElementById('lensCanvas');
+const mCtx      = mainCvs.getContext('2d');
+const lCtx      = lensCvs.getContext('2d');
+// offscreen canvas holds processed image for fast drawImage
+const procCvs   = document.createElement('canvas');
+const pCtx      = procCvs.getContext('2d');
+
+// ─────────────────────────────────────────────────────────────
+// FILE LOADING
+// ─────────────────────────────────────────────────────────────
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    S.iw = img.naturalWidth;
+    S.ih = img.naturalHeight;
+    const tmp = document.createElement('canvas');
+    tmp.width = S.iw; tmp.height = S.ih;
+    const tc = tmp.getContext('2d');
+    tc.drawImage(img, 0, 0);
+    S.orig = tc.getImageData(0, 0, S.iw, S.ih).data;
+    S.pcaCache = null;
+    URL.revokeObjectURL(url);
+    document.getElementById('imgInfo').textContent =
+      `${S.iw} × ${S.ih} px  (${(file.size/1024/1024).toFixed(1)} MB)`;
+    fitView();
+    S.dirty = true;
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    alert('Could not load image.');
+  };
+  img.src = url;
+}
+
+const dz = document.getElementById('dropZone');
+dz.addEventListener('click', () => document.getElementById('fileInput').click());
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('over');
+  loadFile(e.dataTransfer.files[0]);
+});
+document.getElementById('fileInput').addEventListener('change', e => loadFile(e.target.files[0]));
+
+// ─────────────────────────────────────────────────────────────
+// GAUSSIAN DENOISE  (separable, tuned for viewing)
+// ─────────────────────────────────────────────────────────────
+function applyDenoise(data, w, h, strength) {
+  if (strength <= 0) return data;
+  const sigma  = strength * 0.45; // maps 1–10 → σ 0.45–4.5; keeps blur pleasant for viewing
+  const radius = Math.min(8, Math.ceil(3 * sigma)); // 3σ rule; cap at 8 px for performance
+  const ks     = 2 * radius + 1;
+
+  // Build normalised kernel
+  const k = new Float32Array(ks);
+  let ksum = 0;
+  for (let i = 0; i < ks; i++) {
+    const x = i - radius;
+    k[i] = Math.exp(-x * x / (2 * sigma * sigma));
+    ksum += k[i];
+  }
+  for (let i = 0; i < ks; i++) k[i] /= ksum;
+
+  const n   = w * h * 4;
+  const tmp = new Float32Array(n);
+  const out = new Uint8ClampedArray(n);
+
+  // Horizontal pass
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0;
+      for (let ki = 0; ki < ks; ki++) {
+        const nx  = Math.min(w - 1, Math.max(0, x + ki - radius));
+        const idx = (y * w + nx) * 4;
+        const kv  = k[ki];
+        r += data[idx]     * kv;
+        g += data[idx + 1] * kv;
+        b += data[idx + 2] * kv;
+      }
+      const oi = (y * w + x) * 4;
+      tmp[oi] = r; tmp[oi+1] = g; tmp[oi+2] = b; tmp[oi+3] = data[oi+3];
+    }
+  }
+  // Vertical pass
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let r = 0, g = 0, b = 0;
+      for (let ki = 0; ki < ks; ki++) {
+        const ny  = Math.min(h - 1, Math.max(0, y + ki - radius));
+        const idx = (ny * w + x) * 4;
+        const kv  = k[ki];
+        r += tmp[idx]     * kv;
+        g += tmp[idx + 1] * kv;
+        b += tmp[idx + 2] * kv;
+      }
+      const oi = (y * w + x) * 4;
+      out[oi]   = r + 0.5;
+      out[oi+1] = g + 0.5;
+      out[oi+2] = b + 0.5;
+      out[oi+3] = data[oi+3];
+    }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// CLAHE  (luminance-channel, tile-based with bilinear interp)
+// ─────────────────────────────────────────────────────────────
+function applyCLAHE(data, w, h, clipLimit, gridN) {
+  if (clipLimit <= 0) return data;
+  const out  = new Uint8ClampedArray(data);
+  const tW   = Math.ceil(w / gridN);
+  const tH   = Math.ceil(h / gridN);
+
+  // Precompute per-tile equalised CDFs
+  const cdfs = [];
+  for (let ty = 0; ty < gridN; ty++) {
+    for (let tx = 0; tx < gridN; tx++) {
+      const x0 = tx * tW, y0 = ty * tH;
+      const x1 = Math.min(x0 + tW, w);
+      const y1 = Math.min(y0 + tH, h);
+      const np = (x1 - x0) * (y1 - y0);
+
+      const hist = new Float32Array(256);
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = (y * w + x) * 4;
+          const L = (0.2126 * data[i] + 0.7152 * data[i+1] + 0.0722 * data[i+2]) | 0;
+          hist[L]++;
+        }
+      }
+
+      // Clip & redistribute
+      const clipN = clipLimit * np / 256;
+      let excess = 0;
+      for (let v = 0; v < 256; v++) {
+        if (hist[v] > clipN) { excess += hist[v] - clipN; hist[v] = clipN; }
+      }
+      const add = excess / 256;
+      for (let v = 0; v < 256; v++) hist[v] += add;
+
+      // CDF → LUT
+      const cdf = new Float32Array(256);
+      cdf[0] = hist[0];
+      for (let v = 1; v < 256; v++) cdf[v] = cdf[v-1] + hist[v];
+      const cdfMin = cdf[0], scale = 255 / ((np - cdfMin) || 1);
+      for (let v = 0; v < 256; v++)
+        cdf[v] = Math.min(255, Math.max(0, (cdf[v] - cdfMin) * scale));
+      cdfs.push(cdf);
+    }
+  }
+
+  // Apply with bilinear interpolation between four nearest tile CDFs
+  for (let y = 0; y < h; y++) {
+    const tyf = (y - tH * 0.5) / tH;
+    const ty0 = Math.max(0, Math.min(gridN - 1, Math.floor(tyf)));
+    const ty1 = Math.max(0, Math.min(gridN - 1, ty0 + 1));
+    const fy  = tyf - Math.floor(tyf);
+
+    for (let x = 0; x < w; x++) {
+      const txf = (x - tW * 0.5) / tW;
+      const tx0 = Math.max(0, Math.min(gridN - 1, Math.floor(txf)));
+      const tx1 = Math.max(0, Math.min(gridN - 1, tx0 + 1));
+      const fx  = txf - Math.floor(txf);
+
+      const i  = (y * w + x) * 4;
+      const L  = (0.2126 * data[i] + 0.7152 * data[i+1] + 0.0722 * data[i+2]) | 0;
+
+      const c00 = cdfs[ty0 * gridN + tx0][L];
+      const c10 = cdfs[ty0 * gridN + tx1][L];
+      const c01 = cdfs[ty1 * gridN + tx0][L];
+      const c11 = cdfs[ty1 * gridN + tx1][L];
+      const newL = c00*(1-fx)*(1-fy) + c10*fx*(1-fy) + c01*(1-fx)*fy + c11*fx*fy;
+
+      const ratio = L > 0 ? newL / L : 0;
+      out[i]   = Math.min(255, out[i]   * ratio + 0.5) | 0;
+      out[i+1] = Math.min(255, out[i+1] * ratio + 0.5) | 0;
+      out[i+2] = Math.min(255, out[i+2] * ratio + 0.5) | 0;
+    }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// LEVELS  (black / mid / white with gamma)
+// ─────────────────────────────────────────────────────────────
+function applyLevels(data, black, mid, white) {
+  if (black === 0 && mid === 128 && white === 255) return data;
+  const out   = new Uint8ClampedArray(data);
+  const range = white - black || 1;
+  const nm    = Math.max(0.001, Math.min(0.999, (mid - black) / range));
+  const gamma = Math.log(0.5) / Math.log(nm);
+
+  const lut = new Uint8Array(256);
+  for (let v = 0; v < 256; v++) {
+    let c = (v - black) / range;
+    c = Math.max(0, Math.min(1, c));
+    if (gamma !== 1) c = Math.pow(c, gamma);
+    lut[v] = (c * 255 + 0.5) | 0;
+  }
+  for (let i = 0; i < out.length; i += 4) {
+    out[i]   = lut[out[i]];
+    out[i+1] = lut[out[i+1]];
+    out[i+2] = lut[out[i+2]];
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// PCA  (3×3 Jacobi eigendecomposition on R,G,B channels)
+// ─────────────────────────────────────────────────────────────
+function computePCA(data, w, h) {
+  const n = w * h;
+  let mr = 0, mg = 0, mb = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    mr += data[i]; mg += data[i+1]; mb += data[i+2];
+  }
+  mr /= n; mg /= n; mb /= n;
+
+  let c00=0, c01=0, c02=0, c11=0, c12=0, c22=0;
+  for (let i = 0; i < data.length; i += 4) {
+    const dr = data[i]-mr, dg = data[i+1]-mg, db = data[i+2]-mb;
+    c00+=dr*dr; c01+=dr*dg; c02+=dr*db;
+    c11+=dg*dg; c12+=dg*db; c22+=db*db;
+  }
+  c00/=n; c01/=n; c02/=n; c11/=n; c12/=n; c22/=n;
+
+  // Jacobi iterations: 60 sweeps is far more than needed for any 3×3 real symmetric matrix
+  let A = [[c00,c01,c02],[c01,c11,c12],[c02,c12,c22]];
+  let V = [[1,0,0],[0,1,0],[0,0,1]];
+  for (let iter = 0; iter < 60; iter++) {
+    let maxv = 0, p = 0, q = 1;
+    for (let ii = 0; ii < 3; ii++)
+      for (let jj = ii+1; jj < 3; jj++)
+        if (Math.abs(A[ii][jj]) > maxv) { maxv = Math.abs(A[ii][jj]); p=ii; q=jj; }
+    if (maxv < 1e-12) break; // off-diagonal elements negligible — eigendecomposition converged
+    const theta = (A[q][q] - A[p][p]) / (2 * A[p][q]);
+    const t     = Math.sign(theta||1) / (Math.abs(theta) + Math.sqrt(theta*theta+1));
+    const c     = 1 / Math.sqrt(t*t+1);
+    const s     = t * c;
+    const app   = A[p][p], aqq = A[q][q], apq = A[p][q];
+    A[p][p] = app - t*apq;
+    A[q][q] = aqq + t*apq;
+    A[p][q] = A[q][p] = 0;
+    for (let r = 0; r < 3; r++) {
+      if (r !== p && r !== q) {
+        const arp = A[r][p], arq = A[r][q];
+        A[r][p] = A[p][r] = arp*c - arq*s;
+        A[r][q] = A[q][r] = arq*c + arp*s;
+      }
+      const vrp = V[r][p], vrq = V[r][q];
+      V[r][p] = vrp*c - vrq*s;
+      V[r][q] = vrq*c + vrp*s;
+    }
+  }
+
+  // Collect & sort eigenvalues descending
+  const eigs = [
+    { val: A[0][0], vec: [V[0][0], V[1][0], V[2][0]] },
+    { val: A[1][1], vec: [V[0][1], V[1][1], V[2][1]] },
+    { val: A[2][2], vec: [V[0][2], V[1][2], V[2][2]] },
+  ].sort((a, b) => Math.abs(b.val) - Math.abs(a.val));
+
+  // Project & normalise each PC
+  const result = [];
+  for (let pc = 0; pc < 3; pc++) {
+    const v   = eigs[pc].vec;
+    const prj = new Float32Array(n);
+    let mn = Infinity, mx = -Infinity;
+    for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+      const pv = (data[i]-mr)*v[0] + (data[i+1]-mg)*v[1] + (data[i+2]-mb)*v[2];
+      prj[j] = pv;
+      if (pv < mn) mn = pv;
+      if (pv > mx) mx = pv;
+    }
+    const rng  = (mx - mn) || 1;
+    const img  = new Uint8ClampedArray(n * 4);
+    for (let j = 0; j < n; j++) {
+      const gv = ((prj[j] - mn) / rng * 255 + 0.5) | 0;
+      img[j*4] = gv; img[j*4+1] = gv; img[j*4+2] = gv; img[j*4+3] = 255;
+    }
+    result.push(img);
+  }
+
+  const total = eigs.reduce((s, e) => s + Math.abs(e.val), 0) || 1;
+  const pct   = eigs.map(e => (Math.abs(e.val) / total * 100).toFixed(1));
+  document.getElementById('pcaInfo').textContent =
+    `PC1: ${pct[0]}%  PC2: ${pct[1]}%  PC3: ${pct[2]}%`;
+
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────
+// PROCESSING PIPELINE
+// ─────────────────────────────────────────────────────────────
+function processImage() {
+  if (!S.orig) return;
+
+  // PCA mode: show one principal component
+  if (S.pcaIdx > 0) {
+    if (!S.pcaCache) {
+      S.pcaCache = computePCA(S.orig, S.iw, S.ih);
+    }
+    S.processed = S.pcaCache[S.pcaIdx - 1];
+    return;
+  }
+
+  let data = S.orig;
+
+  // 1. Denoise
+  if (S.denoise > 0) data = applyDenoise(data, S.iw, S.ih, S.denoise);
+
+  // 2. Levels
+  if (S.blackPt > 0 || S.midPt !== 128 || S.whitePt < 255)
+    data = applyLevels(data, S.blackPt, S.midPt, S.whitePt);
+
+  // 3. CLAHE
+  if (S.presetIdx > 0)
+    data = applyCLAHE(data, S.iw, S.ih, S.claheClip, S.claheGrid);
+
+  S.processed = data;
+}
+
+// ─────────────────────────────────────────────────────────────
+// RENDER LOOP
+// ─────────────────────────────────────────────────────────────
+function renderFrame() {
+  requestAnimationFrame(renderFrame);
+
+  if (!S.orig) return;
+
+  if (S.dirty) {
+    processImage();
+    procCvs.width  = S.iw;
+    procCvs.height = S.ih;
+    const id = pCtx.createImageData(S.iw, S.ih);
+    id.data.set(S.processed);
+    pCtx.putImageData(id, 0, 0);
+    S.dirty = false;
+  }
+
+  // Main canvas
+  mCtx.fillStyle = '#000';
+  mCtx.fillRect(0, 0, mainCvs.width, mainCvs.height);
+  mCtx.drawImage(procCvs, S.panX, S.panY, S.iw * S.zoom, S.ih * S.zoom);
+
+  // Lens overlay
+  renderLens();
+}
+
+function renderLens() {
+  lCtx.clearRect(0, 0, lensCvs.width, lensCvs.height);
+  if (!S.showLens || !S.processed) return;
+
+  const lx = S.lensLocked ? S.lockX : S.curX;
+  const ly = S.lensLocked ? S.lockY : S.curY;
+
+  // Image-space coords under lens centre
+  const ix = (lx - S.panX) / S.zoom;
+  const iy = (ly - S.panY) / S.zoom;
+
+  // Source half-size in image pixels
+  const srcH = S.lensSize / (2 * S.lensMag);
+
+  const half = S.lensSize / 2;
+  const lx0  = lx - half;
+  const ly0  = ly - half;
+
+  // Clip & draw magnified content
+  lCtx.save();
+  lCtx.beginPath();
+  lCtx.rect(lx0, ly0, S.lensSize, S.lensSize);
+  lCtx.clip();
+  lCtx.drawImage(procCvs,
+    ix - srcH, iy - srcH, srcH * 2, srcH * 2,
+    lx0, ly0, S.lensSize, S.lensSize);
+  lCtx.restore();
+
+  // Border
+  lCtx.strokeStyle = S.lensLocked ? '#e94560' : '#38bdf8';
+  lCtx.lineWidth   = 2;
+  lCtx.strokeRect(lx0, ly0, S.lensSize, S.lensSize);
+
+  // Crosshair in lens centre
+  lCtx.strokeStyle = S.lensLocked ? 'rgba(233,69,96,0.8)' : 'rgba(56,189,248,0.8)';
+  lCtx.lineWidth   = 1;
+  lCtx.beginPath();
+  lCtx.moveTo(lx - 9, ly); lCtx.lineTo(lx + 9, ly);
+  lCtx.moveTo(lx, ly - 9); lCtx.lineTo(lx, ly + 9);
+  lCtx.stroke();
+}
+
+// ─────────────────────────────────────────────────────────────
+// VIEW HELPERS
+// ─────────────────────────────────────────────────────────────
+function fitView() {
+  if (!S.orig) return;
+  const vw = viewer.clientWidth, vh = viewer.clientHeight;
+  S.zoom = Math.min(vw / S.iw, vh / S.ih) * 0.96;
+  S.panX = (vw - S.iw * S.zoom) / 2;
+  S.panY = (vh - S.ih * S.zoom) / 2;
+  updateUI();
+}
+
+function view1to1() {
+  if (!S.orig) return;
+  S.zoom = 1;
+  const vw = viewer.clientWidth, vh = viewer.clientHeight;
+  S.panX = (vw - S.iw) / 2;
+  S.panY = (vh - S.ih) / 2;
+  updateUI();
+}
+
+function adjZoom(delta) {
+  const old  = S.zoom;
+  S.zoom = Math.max(0.02, Math.min(32, S.zoom + delta));
+  const vw   = viewer.clientWidth, vh = viewer.clientHeight;
+  S.panX = vw / 2 - (vw / 2 - S.panX) * S.zoom / old;
+  S.panY = vh / 2 - (vh / 2 - S.panY) * S.zoom / old;
+  updateUI();
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONTROL HANDLERS
+// ─────────────────────────────────────────────────────────────
+function adj(key, delta) {
+  const [mn, mx] = BOUNDS[key];
+  S[key] = Math.max(mn, Math.min(mx, S[key] + delta));
+  // delta was applied above; these lines enforce ordering invariants as floors/ceilings
+  if (key === 'blackPt') S.blackPt = Math.min(S.blackPt, S.midPt - 2, S.whitePt - 5);
+  if (key === 'midPt')   S.midPt   = Math.max(S.blackPt + 1, Math.min(S.whitePt - 1, S.midPt));
+  // whitePt floor: must stay above midPt+1 and blackPt+4 (Math.max enforces minimum)
+  if (key === 'whitePt') S.whitePt = Math.max(S.whitePt, S.midPt + 1, S.blackPt + 5);
+  const pipeline = ['claheClip','claheGrid','blackPt','midPt','whitePt','denoise'];
+  if (pipeline.includes(key)) S.dirty = true;
+  updateUI();
+}
+
+function adjPreset(delta) {
+  S.presetIdx = Math.max(0, Math.min(PRESETS.length - 1, S.presetIdx + delta));
+  const p = PRESETS[S.presetIdx];
+  if (S.presetIdx > 0) { S.claheClip = p.clip; S.claheGrid = p.grid; }
+  S.dirty = true;
+  updateUI();
+}
+
+function adjPca(delta) {
+  S.pcaIdx = Math.max(0, Math.min(3, S.pcaIdx + delta));
+  if (S.pcaIdx === 0) document.getElementById('pcaInfo').textContent = '';
+  S.dirty = true;
+  updateUI();
+}
+
+function toggleLock() {
+  S.lensLocked = !S.lensLocked;
+  if (S.lensLocked) { S.lockX = S.curX; S.lockY = S.curY; }
+  document.getElementById('lockBtn').textContent =
+    S.lensLocked ? '🔒 Lens Locked  [L]' : '🔓 Lock Lens  [L]';
+  document.getElementById('lockBtn').classList.toggle('on', S.lensLocked);
+}
+
+function resetLevels() {
+  S.blackPt = 0; S.midPt = 128; S.whitePt = 255;
+  S.dirty = true;
+  updateUI();
+}
+
+function updateUI() {
+  document.getElementById('v-lensSize').textContent  = S.lensSize + ' px';
+  document.getElementById('v-lensMag').textContent   = S.lensMag.toFixed(1) + '×';
+  document.getElementById('v-zoom').textContent      = (S.zoom * 100).toFixed(0) + '%';
+  document.getElementById('v-preset').textContent    = PRESETS[S.presetIdx].name;
+  document.getElementById('v-claheClip').textContent = S.claheClip.toFixed(1);
+  document.getElementById('v-claheGrid').textContent = S.claheGrid;
+  document.getElementById('v-blackPt').textContent   = S.blackPt;
+  document.getElementById('v-midPt').textContent     = S.midPt;
+  document.getElementById('v-whitePt').textContent   = S.whitePt;
+  document.getElementById('v-denoise').textContent   = S.denoise;
+  document.getElementById('v-pca').textContent       = PCA_NAMES[S.pcaIdx];
+}
+
+// ─────────────────────────────────────────────────────────────
+// MOUSE / TOUCH EVENTS
+// ─────────────────────────────────────────────────────────────
+viewer.addEventListener('mousemove', e => {
+  const r = viewer.getBoundingClientRect();
+  S.curX = e.clientX - r.left;
+  S.curY = e.clientY - r.top;
+  S.showLens = true;
+  document.getElementById('posInfo').textContent =
+    `img (${((S.curX - S.panX) / S.zoom | 0)}, ${((S.curY - S.panY) / S.zoom | 0)})`;
+
+  if (S.panning) {
+    S.panX = S.panOX + (e.clientX - S.panSX);
+    S.panY = S.panOY + (e.clientY - S.panSY);
+  }
+});
+
+viewer.addEventListener('mouseleave', () => {
+  S.showLens = false;
+  S.panning  = false;
+  viewer.style.cursor = 'crosshair';
+});
+
+viewer.addEventListener('mousedown', e => {
+  const startPan = () => {
+    S.panning = true;
+    S.panSX = e.clientX; S.panSY = e.clientY;
+    S.panOX = S.panX;    S.panOY = S.panY;
+    viewer.style.cursor = 'grab';
+  };
+  if (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey)) {
+    e.preventDefault(); startPan(); return;
+  }
+  if (e.button === 0 && S.lensLocked) startPan();
+});
+
+viewer.addEventListener('mouseup', () => {
+  S.panning = false;
+  viewer.style.cursor = 'crosshair';
+});
+viewer.addEventListener('contextmenu', e => e.preventDefault());
+
+viewer.addEventListener('wheel', e => {
+  e.preventDefault();
+  const fac = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const old  = S.zoom;
+  S.zoom = Math.max(0.02, Math.min(32, S.zoom * fac));
+  const r    = viewer.getBoundingClientRect();
+  const cx   = e.clientX - r.left;
+  const cy   = e.clientY - r.top;
+  S.panX = cx - (cx - S.panX) * S.zoom / old;
+  S.panY = cy - (cy - S.panY) * S.zoom / old;
+  updateUI();
+}, { passive: false });
+
+// Touch support
+let t0x = 0, t0y = 0, tOX = 0, tOY = 0, pinch0 = 0, pinchZ = 0;
+viewer.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    const r = viewer.getBoundingClientRect();
+    const t = e.touches[0];
+    S.curX = t.clientX - r.left; S.curY = t.clientY - r.top;
+    S.showLens = true;
+    t0x = t.clientX; t0y = t.clientY; tOX = S.panX; tOY = S.panY;
+    S.panning = true;
+  } else if (e.touches.length === 2) {
+    S.panning = false;
+    pinch0 = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY);
+    pinchZ = S.zoom;
+  }
+}, { passive: true });
+
+viewer.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && S.panning) {
+    const t = e.touches[0];
+    const r = viewer.getBoundingClientRect();
+    S.curX = t.clientX - r.left; S.curY = t.clientY - r.top;
+    S.panX = tOX + (t.clientX - t0x);
+    S.panY = tOY + (t.clientY - t0y);
+  } else if (e.touches.length === 2 && pinch0 > 0) {
+    const d = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY);
+    S.zoom = Math.max(0.02, Math.min(32, pinchZ * d / pinch0));
+    updateUI();
+  }
+}, { passive: false });
+
+viewer.addEventListener('touchend', () => { S.panning = false; });
+
+// ─────────────────────────────────────────────────────────────
+// KEYBOARD SHORTCUTS
+// ─────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  switch (e.key) {
+    case 'l': case 'L': toggleLock(); break;
+    case 'f': case 'F': fitView();    break;
+    case '1':           view1to1();   break;
+    case '+': case '=': adjZoom(0.25); break;
+    case '-': case '_': adjZoom(-0.25); break;
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// RESIZE & INIT
+// ─────────────────────────────────────────────────────────────
+function resizeCanvases() {
+  mainCvs.width  = lensCvs.width  = viewer.clientWidth;
+  mainCvs.height = lensCvs.height = viewer.clientHeight;
+}
+
+window.addEventListener('resize', () => {
+  resizeCanvases();
+  if (S.orig) fitView();
+});
+
+resizeCanvases();
+updateUI();
+requestAnimationFrame(renderFrame);
+</script>
+</body>
+</html>
